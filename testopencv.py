@@ -2,6 +2,8 @@ import cv2 as cv
 import numpy as np
 import time
 
+
+
 def detect_balls(frame):
     # Convert to grayscale
     gray_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -23,7 +25,7 @@ cap.set(cv.CAP_PROP_FRAME_HEIGHT, 360)
 
 time.sleep(2)
 
-#cap.set(cv.CAP_PROP_EXPOSURE, -8.0)
+
 
 while True:
     ret, frame = cap.read()
@@ -37,3 +39,4 @@ while True:
 # Release resources
 cap.release()
 cv.destroyAllWindows()
+
