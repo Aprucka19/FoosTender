@@ -6,9 +6,17 @@ DIR = 13
 STEP = 19
 ENA = 26
 
+def move_sequence(stepper, distances):
+    for distance in distances:
+        while stepper.is_busy():
+            sleep(0.1)  # Check every 0.1 second if the stepper is busy
+        stepper.move(distance)
+        sleep(2)  # Wait for 2 seconds between movements
+
 
 step = Stepper(ENA, STEP, DIR)
 step.initialize()
+
 try:
     while True:
         # Prompt user for input
@@ -33,6 +41,3 @@ except KeyboardInterrupt:
 finally:
     print("Stopping PIGPIO and exiting...")
     step.cleanup()
-
-
-
