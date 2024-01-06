@@ -1,34 +1,70 @@
 import pigpio
+import time
+steps_per_rotation = 3200 #this is the steps per rotation
+#speedtable = [20000, 10000, 5000, 4000, 2500, 2000, 1250, 1000, 800, 625, 500, 400, 250, 200, 100, 50]
+speedtable = [10000, 5000, 2500, 2000, 1250, 1000, 625, 500, 400, 313, 250, 400, 250, 200, 125, 100, 50, 25]
+def find_closest(lst, x):
+    """
+    Finds the value in lst that is closest to x.
+
+    :param lst: List of numbers.
+    :param x: Target number.
+    :return: Value from lst closest to x.
+    """
+    return min(lst, key=lambda number: abs(number - x))
 
 class Stepper:
-    def __init__(self, enable, step, direction):
-        self.position = -1
+    def __init__(self, enable, step, direction, stop):
+        #Define pins
         self.ENABLE = enable
         self.STEP = step
         self.DIRECTION = direction
+        self.STOP = stop
+        #Initialize pigpio
         self.pi = pigpio.pi()
 
+        #Initialize switch
+        self.pi.set_mode(self.STOP, pigpio.INPUT)
+        #self.pi.set_pull_up_down(self.STOP, pigpio.PUD_DOWN)
+        #Cant move till initialized
+        self.position = -1
+
+        #Initialize outputs
         self.pi.set_mode(self.DIRECTION, pigpio.OUTPUT)
         self.pi.set_mode(self.STEP, pigpio.OUTPUT)
         self.pi.set_mode(self.ENABLE, pigpio.OUTPUT)
-        self.pi.set_PWM_dutycycle(self.STEP, 0)  # 50% duty cycle
 
-        self.pi.write(self.DIRECTION, 0)
-        self.pi.write(self.ENABLE, 0)   
+        #Step OFF standard
+        self.pi.set_PWM_dutycycle(self.STEP, 0)  # 50% duty cycle
+        self.disable_motor()
+
+
 
     def initialize(self):
-        self.set_direction(0)  # Set direction to 0
-        #self.pi.set_PWM_frequency(self.step, 100)  # Set PWM frequency
-        # #self.pi.set_PWM_dutycycle(self.step, 128)  # Set duty cycle
+        print("initializing")
+        if(self.pi.read(self.STOP) == 1):
+            print("in loop")
+            self.set_direction(0)  # Set direction to 1
+            self.pi.set_PWM_frequency(self.STEP, steps_per_rotation)  # Set PWM frequency
+            self.pi.set_PWM_dutycycle(self.STEP, 128)  # Set duty cycle
 
-        # self.enable_motor()  # Enable the stepper motor
+            self.enable_motor()  # Enable the stepper motor
 
-        # # Move until STOP pin goes high
-        # while self.pi.read(self.stop) == 0:
-        #     pass  # Continue moving
+            # Move until STOP pin goes high
+            state = self.pi.read(self.STOP)
+            ctr = 0
+            while ctr < 5:
+                state = self.pi.read(self.STOP)
+                #print(state)
+                if state == 0:
+                    ctr += 1
+                else:
+                    ctr = 0
+                pass  # Continue moving
+            self.pi.set_PWM_dutycycle(self.STEP, 0)  # Set duty cycle
 
-        # Once STOP pin is high
-        #self.pi.set_PWM_dutycycle(self.STEP, 0)  # Set duty cycle to 0
+            # Once STOP pin is high
+            #self.pi.set_PWM_dutycycle(self.STEP, 0)  # Set duty cycle to 0
         self.enable_motor()
         self.position = 0
 
@@ -62,7 +98,8 @@ class Stepper:
         if(self.position == -1):
             print("You must initialize the position of the stepper first")
         if (self.pi.wave_tx_busy()):
-            print("Wave is busy. Wait before sending another input.")
+            #print("Wave is busy. Wait before sending another input.")
+            return
         else:
             if(loc > 7 or loc < 0):
                 print("location out of bounds")
@@ -79,14 +116,15 @@ class Stepper:
                 self.pi.write(self.DIRECTION,0)
 
             #freqlist = []
-            start_freq = 1000   # Starting frequency for the ramp
-            max_freq = 20000    # Maximum frequency
-            steps_per_inch = 228
+            start_freq = 100   # Starting frequency for the ramp
+            max_freq = 2500    # Maximum frequency
+            steps_per_inch = steps_per_rotation//2.78333
             total_steps = int(abs(x) * steps_per_inch)  # Total steps to move
+            #print(f"total steps: {total_steps}")
 
             # Assuming linear ramp-up and ramp-down
             #ramp_up_steps = max(total_steps // 6, 400)  # One-third for ramping up
-            ramp_up_steps = min(400,total_steps//2)
+            ramp_up_steps = min(steps_per_rotation // 8,total_steps//2)
             ramp_down_steps = ramp_up_steps    # Same for ramping down
             constant_steps = total_steps - ramp_up_steps - ramp_down_steps  # Remainder for constant speed
 
@@ -94,29 +132,66 @@ class Stepper:
 
 
             # Ramp up frequency
-            freq_increase_steps = ramp_up_steps // ((max_freq - start_freq) // (max_freq//6))
+            freq_increase_steps = ramp_up_steps // 5
             ramp = []
             freq = start_freq
-            while freq < max_freq:
+            ctr = 0
+            while ctr < 5:
                 
-                ramp.append([freq, freq_increase_steps])
-                freq += ((max_freq-start_freq)//6)  # Increase frequency in steps
+                ramp.append([find_closest(speedtable, freq), freq_increase_steps])
+                freq += ((max_freq-start_freq)//5)  # Increase frequency in steps
+                ctr += 1
 
             # Constant speed
             if constant_steps > 0:
                 ramp.append([max_freq, constant_steps])
 
             # Ramp down frequency
-            freq_decrease_steps = ramp_down_steps // ((max_freq - start_freq) // (max_freq//6))
-            while freq > start_freq:
-                freq -= ((max_freq-start_freq)//6)  # Decrease frequency in steps
-                ramp.append([freq, freq_decrease_steps])
+            freq_decrease_steps = ramp_down_steps // 5
+            ctr = 0
+            while ctr < 5:
+                freq -= ((max_freq-start_freq)//5)  # Decrease frequency in steps
+                ramp.append([find_closest(speedtable, freq), freq_decrease_steps])
+                ctr += 1
             #ramp.append([0,0])
             print(ramp)
             # Call generate_ramp function with the ramp profile
+            #self.enable_motor()
             self.generate_ramp(ramp)
+            #self.disable_motor()
 
 
+    def run_wave(self):
+        """
+        Generates a wave at 8000 Hz on a given GPIO pin and sends it once.
+
+        :param pi: Instance of pigpio.pi()
+        :param gpio_pin: GPIO pin number to output the waveform
+        """
+        frequency = 4000  # 8000 Hz
+        cycle_time = int(1e6 / frequency)  # Total time for one cycle in microseconds
+        on_time = cycle_time // 2  # 50% duty cycle
+        off_time = cycle_time - on_time
+
+        # Create a waveform
+        waveform = []
+        for _ in range(1000):  # Create 1000 cycles
+            waveform.append(pigpio.pulse(1 << self.STEP, 0, on_time))
+            waveform.append(pigpio.pulse(0, 1 << self.STEP, off_time))
+
+        # Add and send the waveform
+        self.pi.wave_add_generic(waveform)
+        wave_id = self.pi.wave_create()
+        self.pi.wave_send_once(wave_id)
+
+        # Wait for the wave to be sent
+        while self.pi.wave_tx_busy():
+            time.sleep(0.001)
+
+        # Delete the waveform
+        self.pi.wave_delete(wave_id)
+
+    
     def enable_motor(self):
         self.pi.write(self.ENABLE, 0)
 
@@ -126,6 +201,10 @@ class Stepper:
     def set_direction(self, direction):
         # Assuming 0 for one direction and 1 for the opposite
         self.pi.write(self.DIRECTION, direction)
+    def change_direction(self):
+        direc = self.pi.read(self.DIRECTION)
+        self.pi.write(self.DIRECTION, abs(direc - 1))
+    
     def cleanup(self):
         self.pi.set_PWM_dutycycle(self.STEP, 0)
         self.pi.write(self.DIRECTION, 0)
@@ -146,3 +225,5 @@ class Stepper:
 # stepper.set_direction(0)  # Set direction
 # stepper.move(1)  # Move 1 inch
 # stepper.disable_motor()
+
+
