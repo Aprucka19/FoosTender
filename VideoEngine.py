@@ -115,8 +115,8 @@ class VideoEngine:
             hsv_frame = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
 
             # Define range of green color in HSV
-            lower_green = np.array([35, 50, 50])
-            upper_green = np.array([90, 255, 255])
+            lower_green = np.array([20, 0, 0])
+            upper_green = np.array([100, 190, 210])
 
             # Threshold the HSV image to get only green colors.
             # Outputs outside the range are set to black.
@@ -170,7 +170,8 @@ class VideoEngine:
 
                 if (self.show):
                     temp_frame = frame.copy()
-                    cv.polylines(temp_frame, [field_hull], True, (0, 255, 0), 2)
+                    cv.polylines(temp_frame, [field_hull], True, (0, 0, 255), 4)
+                    cv.drawContours(temp_frame, contours, -1, (0, 255, 0), 1)
                     cropped_temp_frame = temp_frame[y:y+h, x:x+w]
                     cv.line(cropped_temp_frame, left_gk, right_gk, (255, 0, 0), 3)
                     self.show_image("Contours and Limits. GK Bar.", cropped_temp_frame)

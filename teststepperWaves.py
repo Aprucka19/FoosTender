@@ -3,7 +3,7 @@ import pigpio
 from Stepper import Stepper
 DIR = 13
 STEP = 18
-ENA = 26
+ENA = 6
 STOP = 21
 
 
