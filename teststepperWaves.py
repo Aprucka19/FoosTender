@@ -25,7 +25,8 @@ try:
         # Convert input to a number and call move_to
         try:
             distance = float(user_input)
-            step.move(distance)
+            while(step.get_location() != distance):
+                step.move(distance)
         except ValueError:
             print("Invalid input. Please enter a valid number.")
            

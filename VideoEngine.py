@@ -30,10 +30,9 @@ class VideoEngine:
         ball_pos = np.array(self.find_ball_pos(frame))
         # Returns the desired goalkeeper position (0-7in).
         if self.gk_bar_coords == None:
-            raise ValueError("GK bar not initialized")
+            return self.SERVO_LIMIT / 2
         elif np.any(ball_pos) is None:
-            dist = self.SERVO_LIMIT / 2
-            return dist
+            return self.SERVO_LIMIT / 2
         else:
             gk_left = np.array(self.gk_bar_coords[0])
             gk_right = np.array(self.gk_bar_coords[1])
@@ -55,7 +54,7 @@ class VideoEngine:
 
             target_pos = np.round(target_pos, 2)
 
-            if (self.show):
+            if (self.show and ball_pos is not None):
                 temp_frame = frame.copy()
                 ball_proj_point = tuple(np.add(gk_left, projection).astype(int))
                 ball_point = tuple(ball_pos.astype(int))
@@ -67,13 +66,13 @@ class VideoEngine:
 
     def find_ball_pos(self, frame):
         ycrcb_frame = cv.cvtColor(frame, cv.COLOR_BGR2YCrCb)
-        lower_red = np.array([0, 150, 110])
-        upper_red = np.array([135, 180, 180])
+        lower_red = np.array([40, 160, 100])
+        upper_red = np.array([80, 255, 255])
 
         mask = cv.inRange(ycrcb_frame, lower_red, upper_red)
 
         contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-        contours = [cont for cont in contours if cv.contourArea(cont) > 100]
+        contours = [cont for cont in contours if cv.contourArea(cont) > 25]
         
         closest_center = None  # Initialize the closest center as None initially
         min_distance = float('inf')  # Set a very high initial minimum distance
@@ -115,8 +114,8 @@ class VideoEngine:
             hsv_frame = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
 
             # Define range of green color in HSV
-            lower_green = np.array([20, 0, 0])
-            upper_green = np.array([100, 190, 210])
+            lower_green = np.array([30, 0, 5])
+            upper_green = np.array([120, 255, 255])
 
             # Threshold the HSV image to get only green colors.
             # Outputs outside the range are set to black.
@@ -129,8 +128,7 @@ class VideoEngine:
 
 
             # Find the bounding box that encloses all contours
-            if contours:
-
+            if len(contours) >= 8:
                 # Initialize variables for the bounding box coordinates
                 x_min = y_min = float('inf')
                 x_max = y_max = 0
@@ -177,5 +175,6 @@ class VideoEngine:
                     self.show_image("Contours and Limits. GK Bar.", cropped_temp_frame)
 
                 return cropped_frame
+
 
         return frame

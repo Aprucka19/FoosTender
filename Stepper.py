@@ -3,7 +3,7 @@ import time
 import queue
 import threading
 import math
-#Constants:
+#Legacy Constants:
 steps_per_rotation = 3200 #this is the steps per rotation
 start_freq = 1000
 max_freq = 20000
@@ -23,14 +23,16 @@ def find_closest(lst, x):
     return min(lst, key=lambda number: abs(number - x))
 
 class Stepper:
-    def __init__(self, enable, step, direction, stop, verbose=False,timing = False):
+    def __init__(self, enable, step, direction, stop, verbose=False,timing = False, multithread = False):
         #Define pins
         self.verbose = verbose
         self.ENABLE = enable
         self.STEP = step
         self.DIRECTION = direction
         self.STOP = stop
-        
+        self.multithread = multithread
+        self.waves_sent = 0
+        self.frames_processed = 0
 
         #timing
         self.timing = timing
@@ -60,16 +62,18 @@ class Stepper:
         #Movement state stores the direction and final frequency of the last sent wave
         self.currdirec = 0
         self.lastfreq = 0
-
         # Initialize a lock for thread-safe operations
         self.queue_lock = threading.Lock()
 
         # Initialize queue for ramp profiles
         self.ramp_queue = queue.Queue()
+
         
         # Start the generate_ramp thread
-        self.ramp_thread = threading.Thread(target=self.generate_ramp, daemon=True)
-        self.ramp_thread.start()
+        if (self.multithread):
+
+            self.ramp_thread = threading.Thread(target=self.generate_ramp_threading, daemon=True)
+            self.ramp_thread.start()
 
 
 
@@ -102,8 +106,46 @@ class Stepper:
         self.enable_motor()
         self.position = 0
 
+    def generate_ramp(self,wave,loc,direction):
+        if not self.pi.wave_tx_busy():
+            if(self.timing):
+                start = time.time()
+                self.count += 1
+            ramp = wave
+            self.pi.write(self.DIRECTION, direction)
+            if (self.verbose):print("Ramp generating")
+            if (self.verbose):print(wave)
+            if (self.verbose):print(f"start position: {self.position}, destination {loc}")
+            self.position = loc
+            """Generate ramp wave forms."""
+            self.pi.wave_clear()  # clear existing waves
+            length = len(ramp)  # number of ramp levels
+            wid = [-1] * length
 
-    def generate_ramp(self):
+            # Generate a wave per ramp level
+            for i in range(length):
+                frequency = ramp[i][0]
+                micros = int(500000 / frequency)
+                wf = []
+                wf.append(pigpio.pulse(1 << self.STEP, 0, micros))  # pulse on
+                wf.append(pigpio.pulse(0, 1 << self.STEP, micros))  # pulse off
+                self.pi.wave_add_generic(wf)
+                wid[i] = self.pi.wave_create()
+
+            # Generate a chain of waves
+            chain = []
+            for i in range(length):
+                steps = ramp[i][1]
+                x = steps & 255
+                y = steps >> 8
+                chain += [255, 0, wid[i], 255, 1, x, y]
+
+            self.pi.wave_chain(chain)  # Transmit chain.
+            if(self.timing):
+                self.timer += time.time()-start
+                self.waves_sent += 1
+
+    def generate_ramp_threading(self):
         while True:
             if not self.ramp_queue.empty() and not self.pi.wave_tx_busy():
                 with self.queue_lock:
@@ -172,7 +214,7 @@ class Stepper:
         ramp_up_steps = min(steps_per_rotation // 8,total_steps//2)
         ramp_down_steps = ramp_up_steps    # Same for ramping down
         constant_steps = total_steps - ramp_up_steps - ramp_down_steps  # Remainder for constant speed
-
+        
         # Create ramp profile
 
 
@@ -199,13 +241,44 @@ class Stepper:
             ramp.append([find_closest(speedtable, freq), freq_decrease_steps])
             ctr += 1
         #ramp.append([0,0])
-        move = (ramp,loc,direc)
+        self.generate_ramp(ramp, loc, direc)
         #print(move)
-        self.ramp_queue.put(move)
         # Call generate_ramp function with the ramp profile
         #self.enable_motor()
     
-    def calculate_ramp2(self, loc):
+
+
+    def calculate_move_120(self, loc):
+        x = loc - self.position
+        if (self.verbose):print(f"Position: {self.position}")
+        if (self.verbose):print(f"Location requested: {loc}")
+        #print(self.position)
+        #print(x)
+        total_steps = int(abs(x) * steps_per_inch)  # Total steps to move
+        total_steps = min(120, total_steps)
+
+        if(x == 0):
+            return
+        if(x > 0):
+            direc = 1
+            #self.pi.write(self.DIRECTION,1)
+            loc = self.position + (total_steps / steps_per_inch)
+        else:
+            direc = 0
+            loc = self.position - (total_steps / steps_per_inch)
+            #self.pi.write(self.DIRECTION,0)
+
+
+        ramp = []
+        ramp.append([20000, total_steps])
+
+
+        self.generate_ramp(ramp, loc, direc)
+        
+
+
+
+    def calculate_ramp_threading(self, loc):
         x = loc - self.position
         loc = self.position
         if (self.verbose):print(f"Position: {self.position}")
@@ -282,25 +355,34 @@ class Stepper:
         if(self.position == -1):
             print("You must initialize the position of the stepper first")
         else:
-            with self.queue_lock:
-                # Clear the queue
-                while not self.ramp_queue.empty():
-                    try:
-                        self.ramp_queue.get_nowait()
-                        self.ramp_queue.task_done()
-                    except queue.Empty:
-                        break
-                if(self.position == -1):
-                    print("You must initialize the position of the stepper first")
-                else:
-                    if(loc > 7 or loc < 0):
-                        print("location out of bounds")
-                        return
-                    if(abs(self.position - loc) < .35):
-                        return
-                    # Add the new ramp profile to the queue
-                    self.calculate_ramp2(loc)
-                
+            if self.multithread:
+               with self.queue_lock:
+                    # Clear the queue
+                    while not self.ramp_queue.empty():
+                        try:
+                            self.ramp_queue.get_nowait()
+                            self.ramp_queue.task_done()
+                        except queue.Empty:
+                            break
+                    if(self.position == -1):
+                        print("You must initialize the position of the stepper first")
+                    else:
+                        if(loc > 7 or loc < 0):
+                            print("location out of bounds")
+                            return
+                        if(abs(self.position - loc) < .35):
+                            return
+                        # Add the new ramp profile to the queue
+                        self.calculate_ramp_threading(loc)
+            else:
+                if(loc > 7 or loc < 0):
+                    print("location out of bounds")
+                    return
+                if(abs(self.position - loc) < .35):
+                    return
+                #self.calculate_ramp(loc)
+                self.calculate_move_120(loc)
+                if(self.timing):self.frames_processed += 1
 
 
     def run_wave(self):
@@ -346,6 +428,8 @@ class Stepper:
     def change_direction(self):
         direc = self.pi.read(self.DIRECTION)
         self.pi.write(self.DIRECTION, abs(direc - 1))
+    def get_location(self):
+        return self.position
     
     def cleanup(self):
         self.pi.set_PWM_dutycycle(self.STEP, 0)
@@ -355,6 +439,7 @@ class Stepper:
         if(self.timing):
             print(f"Generate ramp time value: {self.timer}")
             print(f"Generate ramp average fps: {self.count/self.timer}")
+            print(f"Frames processed: {self.frames_processed}, Waves sent: {self.waves_sent}")
 
     def is_busy(self):
         return self.pi.wave_tx_busy()
